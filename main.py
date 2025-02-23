@@ -15,7 +15,7 @@ open_ai_key = os.getenv("OPEN_AI_KEY")
 sp_client_id = os.getenv("SPOTIFY_CLIENT_ID")
 sp_client_secret = os.getenv("SPOTIFY_CLIENT_SECRET")
 
-if (not google_ai_key and not open_ai_key) or not sp_client_id or not sp_client_secret or:
+if (not google_ai_key and not open_ai_key) or not sp_client_id or not sp_client_secret:
     raise ValueError("APIキーまたはクライアントシークレットが設定されていません")
 
 genai.configure(api_key=google_ai_key)
