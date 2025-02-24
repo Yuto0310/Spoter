@@ -90,7 +90,15 @@ def generate_song_json() -> Dict[str, Any]:
                 "properties": {
                     "song_ids": {
                         "type": "array",
-                        "items": {"type": "integer"}
+                        "items": {
+                            "anyOf": [
+                                {"type": "integer"},
+                                {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                }
+                            ]
+                        },
                     }
                 },
                 "required": ["song_ids"],
@@ -123,12 +131,7 @@ sp = spotipy.Spotify(auth_manager=SpotifyClientCredentials(client_id=sp_client_i
 
 def search_track(title, artist, album, year, limit=30):
     if not title and not artist and not album and not year:
-        # 日本のランキング上位50位を取得
-        top_50_playlist_id = "37i9dQZEVXbKXQ4mDTEBXq"  # Japan Top 50のプレイリストID
-        results = sp.playlist_items(top_50_playlist_id, limit=limit)
-        print(results)
-        tracks = results['items']
-        return [track['track'] for track in tracks]
+        return []
     else:
         query = " ".join(filter(None, [
             f"track:{title}" if title else "",
@@ -137,9 +140,13 @@ def search_track(title, artist, album, year, limit=30):
             f"year:{year}" if year else ""
         ]))
         print(query)
-        results = sp.search(q=query, limit=limit, type='track')
-        tracks = results['tracks']['items']
-        return tracks
+        try:
+            results = sp.search(q=query, limit=limit, type='track')
+            tracks = results['tracks']['items']
+            return tracks
+        except Exception as e:
+            print(f"Error in search_track: {e}")
+            return []
 
 def return_songs(user_query: str, model_type: str = "GPT") -> List[Dict[str, str]]:
     try:
@@ -148,12 +155,11 @@ def return_songs(user_query: str, model_type: str = "GPT") -> List[Dict[str, str
         elif model_type == "Gemini":
             conditions = askGoogleAI(system_prompt1 + "\n実際のユーザーのリクエスト: " + user_query + "\n リスポンス形式: {'title': str, 'artist': str, 'album': str, 'year': str, 'others': list(str)}")
         else:
-            raise ValueError("Invalid model type specified")
+            print("Invalid model type specified")
+            return []
 
         print(conditions)
-        song_list_tracks = search_track(conditions["title"], conditions["artist"], conditions["album"], conditions["year"], limit=50)
-        if len(song_list_tracks) == 0:
-            raise ValueError("No tracks found with the given conditions")
+        song_list_tracks = search_track(conditions.get("title", ""), conditions.get("artist", ""), conditions.get("album", ""), conditions.get("year", ""), limit=50)
 
         song_list = []
         for idx, track in enumerate(song_list_tracks):
@@ -173,25 +179,35 @@ def return_songs(user_query: str, model_type: str = "GPT") -> List[Dict[str, str
         system_prompt2 = """
         あなたは、曲の雰囲気や、特徴、情報などを考えて、条件に合うような10個を選ぶアシスタントです。
         ユーザーから与えられるsong_listの中で、conditionを満たすようなものを10個教えてください。
-        song_listのそれぞれの曲に数字が割り当てられているので、その数字のみをリストにして返してください。
+        song_listのそれぞれの曲に数字が割り当てられているので、その数字のみをintegerとして、リストにして返してください。
+
+        もしsong_listが空の場合は、conditionを満たすような10個を自由に選んで、['{artist名}', '{タイトル名}']の形式でarray<string>としてリストにして返してください。
+        もしsong_list内でconditionを満たすような曲が10個に満たない場合、song_listの傾向から、それを選んだ人が好きそうな、conditionを満たす曲を10曲自由に選んで、['{artist名}', '{タイトル名}']の形式でarray<string>としてリストにして返してください。
+
+        つまり、idは必ずsong_listにあるidのみ。そして、条件を満たす曲が10曲に満たなければ、合計が10になるように、['{artist名}', '{タイトル名}']の形式で適切な曲を選んでください。
+        例      song_ids: [0, 1, 2, 3, 4, 5, 6, 7, ['米津玄師', 'Lemon'], ['Mrs.GREEN APPLE', 'ライラック']]
         """
 
         user_query2 = f"""
         song_list: {song_list}
-        condition: {conditions["others"]}
+        condition: {conditions.get("others", [])}
         """
 
         if model_type == "GPT":
-            song_ids = askGPT(client, system_prompt2, user_query2, generate_song_json())["song_ids"]
+            song_ids = askGPT(client, system_prompt2, user_query2, generate_song_json()).get("song_ids", [])
         elif model_type == "Gemini":
-            song_ids = askGoogleAI(system_prompt2 + "\n実際のユーザーのリクエスト: " + user_query2 + "\n リスポンス形式: {'song_ids': list(int)}")["song_ids"]
+            song_ids = askGoogleAI(system_prompt2 + "\n実際のユーザーのリクエスト: " + user_query2 + "\n リスポンス形式: {'song_ids': list(int)}").get("song_ids", [])
 
         print(song_ids)
         result_songs = []
         for song_id in song_ids:
             try:
-                track_info = song_list_tracks[song_id]
-                result_songs.append(track_info["uri"])
+                if isinstance(song_id, int):
+                    track_info = song_list_tracks[song_id]
+                    result_songs.append(track_info["uri"])
+                else:
+                    track_info = search_track(song_id[1], song_id[0], "", "", limit=1)[0]
+                    result_songs.append(track_info["uri"])
             except (IndexError, ValueError) as e:
                 print(f"Error retrieving track info for song_id {song_id}: {e}")
         return result_songs
@@ -205,4 +221,4 @@ if __name__ == "__main__":
     model_type = input("使用するモデルを指定してください (GPT/Gemini): \t")
     songs = return_songs(user_query, model_type)
     for song in songs:
-        print(f"TITLE: {song['title']} URL: {song['url']}")
+        print(f"URI: {song}")

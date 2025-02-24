@@ -20,7 +20,7 @@ sp = spotipy.Spotify(auth_manager=sp_oauth)
 user_id = sp.current_user()["id"]
 
 user_query = input("曲のイメージを教えてください: \t")
-songs = return_songs(user_query, "GPT")
+songs = return_songs(user_query, "Gemini")
 print(f"song_uris: {songs}")
 if songs:
   current_songs = sp.playlist_items(sp_playlist_id)["items"]
